@@ -13,8 +13,10 @@
   "type": "commonjs",
   "dependencies": {
     "cors": "^2.8.6",
+    "dns": "^0.2.2",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "firebase-admin": "^14.4.0",
     "mongodb": "^7.5.0"
   }
 }

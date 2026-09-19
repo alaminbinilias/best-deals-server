@@ -1,6 +1,12 @@
+///for DNS error
+const dns = require("dns");
+
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
+
+//import all server related....
 const express = require("express");
 const cors = require("cors");
-require('dotenv').config();
+require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const port = process.env.PORT || 4000;
@@ -10,6 +16,53 @@ const port = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
+//Firebase AdminSDk
+const admin=require("firebase-admin");
+const {getAuth}= require("firebase-admin/auth");
+const serviceAccount=require("./best-deals-for-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential:admin.cert(serviceAccount)
+})
+
+/// created middleware....
+
+// const logger = (req, res, next) => {
+//   console.log("Hello");
+//   next();
+// };
+
+///authLoginMiddleware....
+
+const verfiedLoginMiddleware = async(req, res, next) => {
+
+  //console.log("middleware Token", req.headers.authorization);
+
+  const getToken=req.headers.authorization;
+  if(!req.headers.authorization){
+    return res.status(401).send({message:"Unauthorized Access"});
+  }
+  const onlyTokenPart=getToken.split(" ")[1];
+  //console.log(onlyTokenPart);
+  if(!onlyTokenPart){
+    return res.status(401).send({message:"Unauthorized Access"});
+  }
+
+  ///now verify firebase token
+
+  try{
+    const decodedToken=await getAuth().verifyIdToken(onlyTokenPart);
+    //console.log(decodedToken);
+    const usrEmail=decodedToken.email;
+    //console.log(usrEmail);
+    req.vrifyEmailAddress=usrEmail;
+    next();
+  }catch(err){
+    console.log("Token Invaild",err);
+  }
+
+};
+
 app.get("/", (req, res) => {
   res.send("Best Deals server");
 });
@@ -18,8 +71,7 @@ app.get("/", (req, res) => {
 
 //best_deals
 //H3zjq81cWjbgSeQd
-const uri =
-  `mongodb+srv://${process.env.DB_User}:${process.env.DB_Pass}@cluster0.afmvsxs.mongodb.net/?appName=Cluster0`;
+const uri = `mongodb+srv://${process.env.DB_User}:${process.env.DB_Pass}@cluster0.afmvsxs.mongodb.net/?appName=Cluster0`;
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -134,7 +186,7 @@ async function run() {
 
     /// All bid details for a spacific product
 
-    app.get("/products/bids/:id", async (req, res) => {
+    app.get("/products/bids/:id",verfiedLoginMiddleware, async (req, res) => {
       const ProductId = req.params.id;
       const query = {
         productId: ProductId,
@@ -149,7 +201,7 @@ async function run() {
     ///Bid post section
     app.post("/bids", async (req, res) => {
       const newBids = req.body;
-      const bidvalue=newBids.bidPrice;
+      const bidvalue = newBids.bidPrice;
       //console.log(bidvalue);
       const result = await BidCollection.insertOne(newBids);
       res.send(result);
@@ -162,36 +214,27 @@ async function run() {
       res.send(result);
     });
 
-    ///bid Details for a specific email
-
-    // app.get("/bids/mybids/email=:email", async (req, res) => {
-
-    //   const emails=req.params.email;
-
-    //   const cursor = BidCollection.find({buyerEmail:emails});
-    //   const result = await cursor.toArray();
-    //   res.send(result);
-    // });
-
-    ///bid Details for a specific email
-
-    app.get("/bids/mybids",async(req,res)=>{
-
+    //bid details for a specific email
+    app.get("/bids/mybids", verfiedLoginMiddleware, async (req, res) => {
+      //console.log(req.vrifyEmailAddress);
+      //console.log("token", req.headers);
       //console.log(req.query.email);
-      console.log("token", req.headers);
+      if(req.vrifyEmailAddress!=req.query.email){
+        return res.status(401).send({message:"Forbidden Access"});
+      }
+      let quary = {};
 
-      let quary={};
+      //if(req.vrifyEmailAddress!=req.)
 
-      if(req.query.email){
-        quary={
-          buyerEmail:req.query.email
-        }
+      if (req.query.email) {
+        quary = {
+          buyerEmail: req.query.email,
+        };
       }
 
-      const cursor=BidCollection.find(quary);
-      const result= await cursor.toArray();
+      const cursor = BidCollection.find(quary);
+      const result = await cursor.toArray();
       res.send(result);
-
     });
 
     app.delete("/mybids/:id", async (req, res) => {
