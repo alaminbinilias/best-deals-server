@@ -5,6 +5,7 @@ dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
 //import all server related....
 const express = require("express");
+const jwt = require("jsonwebtoken");
 const cors = require("cors");
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
@@ -17,13 +18,15 @@ app.use(cors());
 app.use(express.json());
 
 //Firebase AdminSDk
-const admin=require("firebase-admin");
-const {getAuth}= require("firebase-admin/auth");
-const serviceAccount=require("./best-deals-for-firebase-adminsdk.json");
+const admin = require("firebase-admin");
+const { getAuth } = require("firebase-admin/auth");
+const serviceAccount = require("./best-deals-for-firebase-adminsdk.json");
 
 admin.initializeApp({
-  credential:admin.cert(serviceAccount)
-})
+  credential: admin.cert(serviceAccount),
+});
+
+///Jwt tokens
 
 /// created middleware....
 
@@ -34,33 +37,63 @@ admin.initializeApp({
 
 ///authLoginMiddleware....
 
-const verfiedLoginMiddleware = async(req, res, next) => {
-
+const verfiedLoginMiddleware = async (req, res, next) => {
   //console.log("middleware Token", req.headers.authorization);
 
-  const getToken=req.headers.authorization;
-  if(!req.headers.authorization){
-    return res.status(401).send({message:"Unauthorized Access"});
+  const getToken = req.headers.authorization;
+  //console.log(req.headers.authorization);
+  if (!req.headers.authorization) {
+    return res.status(401).send({ message: "Unauthorized Access" });
   }
-  const onlyTokenPart=getToken.split(" ")[1];
+  const onlyTokenPart = getToken.split(" ")[1];
   //console.log(onlyTokenPart);
-  if(!onlyTokenPart){
-    return res.status(401).send({message:"Unauthorized Access"});
+  if (!onlyTokenPart) {
+    return res.status(401).send({ message: "Unauthorized Access" });
   }
 
   ///now verify firebase token
 
-  try{
-    const decodedToken=await getAuth().verifyIdToken(onlyTokenPart);
+  try {
+    const decodedToken = await getAuth().verifyIdToken(onlyTokenPart);
     //console.log(decodedToken);
-    const usrEmail=decodedToken.email;
-    //console.log(usrEmail);
-    req.vrifyEmailAddress=usrEmail;
+    if (decodedToken.email) {
+      const usrEmail = decodedToken.email;
+      req.vrifyEmailAddress = usrEmail;
+    }
     next();
-  }catch(err){
-    console.log("Token Invaild",err);
+  } catch (err) {
+    console.log("Token Invaild", err);
+  }
+};
+
+const JwtLoginMiddleware = (req, res, next) => {
+  console.log(req.headers.authorization);
+
+  if(!req.headers.authorization){
+    return res.status(403).send({message:"unauthorized Access"});
   }
 
+  const tokens=req.headers.authorization.split(" ")[1];
+  //console.log("My Tokens",tokens);
+  if(!tokens){
+    return res.status(403).send({message:"unauthorized Access"});
+  }
+
+  ///verify the tokens
+  jwt.verify(tokens,process.env.Jwt_secret, function(err,decoded){
+    if(err){
+      console.log("Invalid Tokens");
+      return res.status(401).send({message:"unauthorized Access"});
+    }
+    else{
+      console.log(decoded);
+      const tokenEmail=decoded.email;
+      //console.log(tokenEmail);
+      req.tokensemail=tokenEmail;
+      next();
+    }
+  })
+  //next();
 };
 
 app.get("/", (req, res) => {
@@ -86,6 +119,7 @@ async function run() {
   await client.connect().then(() => {
     app.listen(port, () => {
       console.log(`Server is Running on Port ${port}`);
+      //console.log(process.env.Jwt_secret);
     });
 
     //database create
@@ -94,6 +128,16 @@ async function run() {
     const ProductCollection = mydb.collection("products");
     const usersCollection = mydb.collection("users");
     const BidCollection = mydb.collection("bids");
+
+    app.post("/gettokens", (req, res) => {
+      const userinfo = req.body;
+      //console.log(userinfo);
+      const token = jwt.sign(userinfo, process.env.Jwt_secret, {
+        expiresIn: "1h",
+      });
+      //console.log(process.env.Jwt_secret);
+      res.send({ Token: token });
+    });
 
     ///For All users Operations
 
@@ -186,7 +230,7 @@ async function run() {
 
     /// All bid details for a spacific product
 
-    app.get("/products/bids/:id",verfiedLoginMiddleware, async (req, res) => {
+    app.get("/products/bids/:id", JwtLoginMiddleware, async (req, res) => {
       const ProductId = req.params.id;
       const query = {
         productId: ProductId,
@@ -216,16 +260,16 @@ async function run() {
 
     //bid details for a specific email
     app.get("/bids/mybids", verfiedLoginMiddleware, async (req, res) => {
-      //console.log(req.vrifyEmailAddress);
+      //console.log("vrify Email Address",req.vrifyEmailAddress);
       //console.log("token", req.headers);
-      //console.log(req.query.email);
-      if(req.vrifyEmailAddress!=req.query.email){
-        return res.status(401).send({message:"Forbidden Access"});
+      //console.log("Get User Login",req.query.email);
+      if (req.vrifyEmailAddress) {
+        if (req.vrifyEmailAddress !== req.query.email) {
+          return res.status(403).send({ message: "Forbidden Access" });
+        }
       }
+
       let quary = {};
-
-      //if(req.vrifyEmailAddress!=req.)
-
       if (req.query.email) {
         quary = {
           buyerEmail: req.query.email,
