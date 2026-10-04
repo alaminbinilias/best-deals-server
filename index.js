@@ -17,85 +17,81 @@ const port = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
-//Firebase AdminSDk
-const admin = require("firebase-admin");
+///FireBase AdminSdk
+
+const admin=require('firebase-admin');
+const decoded = Buffer.from(process.env.firebase_service_Key, "base64").toString("utf8");
+const serviceAccount = JSON.parse(decoded);
 const { getAuth } = require("firebase-admin/auth");
-const serviceAccount = require("./best-deals-for-firebase-adminsdk.json");
+const { env } = require("process");
 
 admin.initializeApp({
-  credential: admin.cert(serviceAccount),
+  credential:admin.cert(serviceAccount)
 });
 
-///Jwt tokens
+//AuthLoginMiddleWare
 
-/// created middleware....
+const verifyFireBaseToken=async(req,res,next)=>{
 
-// const logger = (req, res, next) => {
-//   console.log("Hello");
-//   next();
-// };
+  //console.log(req.headers);
 
-///authLoginMiddleware....
-
-const verfiedLoginMiddleware = async (req, res, next) => {
-  //console.log("middleware Token", req.headers.authorization);
-
-  const getToken = req.headers.authorization;
-  //console.log(req.headers.authorization);
-  if (!req.headers.authorization) {
-    return res.status(401).send({ message: "Unauthorized Access" });
+  if(!req.headers){
+    return res.status(403).send({message:"Invalid Access"});
   }
-  const onlyTokenPart = getToken.split(" ")[1];
-  //console.log(onlyTokenPart);
-  if (!onlyTokenPart) {
-    return res.status(401).send({ message: "Unauthorized Access" });
-  }
-
-  ///now verify firebase token
-
-  try {
-    const decodedToken = await getAuth().verifyIdToken(onlyTokenPart);
-    //console.log(decodedToken);
-    if (decodedToken.email) {
-      const usrEmail = decodedToken.email;
-      req.vrifyEmailAddress = usrEmail;
-    }
-    next();
-  } catch (err) {
-    console.log("Token Invaild", err);
-  }
-};
-
-const JwtLoginMiddleware = (req, res, next) => {
-  console.log(req.headers.authorization);
-
   if(!req.headers.authorization){
-    return res.status(403).send({message:"unauthorized Access"});
+    return res.status(403).send({message:"Invalid Access"});
   }
+  const tokens= req.headers.authorization.split(" ")[1];
+  //console.log(tokens);
 
-  const tokens=req.headers.authorization.split(" ")[1];
-  //console.log("My Tokens",tokens);
   if(!tokens){
-    return res.status(403).send({message:"unauthorized Access"});
+    return res.status(403).send({message:"Invalid Access"});
+  }
+  ///verify token;
+
+  try{
+    const verifiedToken= await getAuth().verifyIdToken(tokens);
+    //console.log(verifiedToken);
+    const vTokenEmail=verifiedToken.email;
+    req.vEmailAddress=vTokenEmail;
+    //console.log(verifiedToken);
+    next();
+
+  }
+  catch(err){
+    console.log("Error Token Found",err);
+  }
+}
+
+const OwnGeneratedTokensMiddleWare=(req,res,next)=>{
+  //console.log(req.headers.authorization);
+
+  if(!req.headers){
+    return res.status(403).send({message:"Unauthorized Access"});
+  }
+  if(!req.headers.authorization){
+    return res.status(403).send({message:"Unauthorized Access"});
+  }
+  const purifiedTokens=req.headers.authorization.split(" ")[1];
+  //console.log(purifiedTokens);
+
+  if(!purifiedTokens){
+    return res.status(403).send({message:"Unauthorized Access"});
   }
 
-  ///verify the tokens
-  jwt.verify(tokens,process.env.Jwt_secret, function(err,decoded){
+  ///verify tokens;
+  jwt.verify(purifiedTokens,process.env.Token_Secret,(err,decoded)=>{
     if(err){
-      console.log("Invalid Tokens");
-      return res.status(401).send({message:"unauthorized Access"});
+      console.log("Invalid Access");
+      return res.status(403).send({message:"Unauthorized Access"});
     }
     else{
-      console.log(decoded);
-      const tokenEmail=decoded.email;
-      //console.log(tokenEmail);
-      req.tokensemail=tokenEmail;
+      //console.log(decoded);
+      decoded;
       next();
     }
   })
-  //next();
-};
-
+}
 app.get("/", (req, res) => {
   res.send("Best Deals server");
 });
@@ -129,14 +125,15 @@ async function run() {
     const usersCollection = mydb.collection("users");
     const BidCollection = mydb.collection("bids");
 
-    app.post("/gettokens", (req, res) => {
-      const userinfo = req.body;
-      //console.log(userinfo);
-      const token = jwt.sign(userinfo, process.env.Jwt_secret, {
-        expiresIn: "1h",
-      });
-      //console.log(process.env.Jwt_secret);
-      res.send({ Token: token });
+    app.post('/getTokens',(req,res)=>{
+
+      //console.log(process.env.Token_Secret);
+
+      //console.log(req.body);
+
+      const tokens= jwt.sign(req.body,process.env.Token_Secret,{expiresIn:'1h'});
+      //console.log("That is your Tokens",tokens);
+      res.send({"tokens": tokens});
     });
 
     ///For All users Operations
@@ -147,7 +144,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/users", async (req, res) => {
+    app.get("/users",async (req, res) => {
       const cursor = usersCollection.find();
       const result = await cursor.toArray();
       res.send(result);
@@ -155,14 +152,15 @@ async function run() {
 
     /// For all Products Operations
     //create operation
-    app.post("/products", async (req, res) => {
+    app.post("/products",verifyFireBaseToken,async (req, res) => {
       const newProducts = req.body;
+      //console.log(req.headers);
       const result = await ProductCollection.insertOne(newProducts);
       res.send(result);
     });
 
     //Read operation for all products
-    app.get("/products", async (req, res) => {
+    app.get("/products",verifyFireBaseToken,async (req, res) => {
       const cursor = ProductCollection.find();
       const result = await cursor.toArray();
       res.send(result);
@@ -190,7 +188,7 @@ async function run() {
       const id = req.params.id;
       //console.log(id);
       const quary = {
-        _id: id,
+        _id:new ObjectId(id)
       };
       const result = await ProductCollection.findOne(quary);
       res.send(result);
@@ -230,7 +228,8 @@ async function run() {
 
     /// All bid details for a spacific product
 
-    app.get("/products/bids/:id", JwtLoginMiddleware, async (req, res) => {
+    app.get("/products/bids/:id",OwnGeneratedTokensMiddleWare,async (req, res) => {
+      //console.log(req.headers);
       const ProductId = req.params.id;
       const query = {
         productId: ProductId,
@@ -259,13 +258,32 @@ async function run() {
     });
 
     //bid details for a specific email
-    app.get("/bids/mybids", verfiedLoginMiddleware, async (req, res) => {
-      //console.log("vrify Email Address",req.vrifyEmailAddress);
-      //console.log("token", req.headers);
-      //console.log("Get User Login",req.query.email);
-      if (req.vrifyEmailAddress) {
-        if (req.vrifyEmailAddress !== req.query.email) {
-          return res.status(403).send({ message: "Forbidden Access" });
+
+    app.get("/myproducts",async(req,res)=>{
+      const email=req.headers.email;
+
+      const query={
+        email:email
+      }
+      //console.log(email);
+      const cursor=ProductCollection.find(query);
+      const result=await cursor.toArray();
+      res.send(result);
+    });
+
+    app.get("/bids/mybids",verifyFireBaseToken,async (req, res) => {
+      //console.log("This is Headers", req.headers);
+      //console.log(req);
+      //console.log("Request Email",req.query.email);
+      //console.log("given email",req.headers.emails);
+      if(req.vEmailAddress){
+        if(req.vEmailAddress!==req.query.email){
+          return res.status(401).send({ message: "Forbidden Access" });
+        }
+      }
+      else{
+        if(req.headers.emails!==req.query.email){
+          return res.status(401).send({ message: "Forbidden Access" });
         }
       }
 
